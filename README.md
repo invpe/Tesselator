@@ -1,5 +1,8 @@
 # Tesselator
 
+![image](https://github.com/user-attachments/assets/ebf88d73-133c-4bd6-9492-cb8744253d4f)
+
+
 Tesselator is a lightweight and efficient distributed computing solution designed even for home use, utilizing tiny ESP32 devices and a simple Python tool. 
 The system operates without the need for a central server, as nodes communicate over UDP to advertise their availability and retrieve tasks, payloads, and arguments through HTTP endpoints, all managed by a straightforward Python script.
 
