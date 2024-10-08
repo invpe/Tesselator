@@ -4,6 +4,7 @@
     It ties to my speculative researches i always like doing.
 
     The steps are as follows:
+    0. The dataset is firstly read for min/max values for normalization later on
     1. The dataset is read in chunks, and for each chunk, a DSC transformation maps the data points into 3D space.
     2. The 3D points (x, y, z) are normalized to the range [0, 1] based on the minimum and maximum values of the dataset.
     3. These points are then projected onto a 2D grid of size GRID_SIZE x GRID_SIZE (e.g., 10x10), where the x and y coordinates are used for binning, while the z-axis (depth) is ignored.
@@ -39,6 +40,9 @@
 int bins[GRID_SIZE][GRID_SIZE] = {0}; 
 int iTotalPointsCount = 0;
 
+double iMinValue, iMaxValue;
+
+
 struct tPosition {
     double x;
     double y;
@@ -72,11 +76,13 @@ void calculate_2D_bin(struct tPosition pos) {
 }
 
 // Function to process a chunk of data, calculate DSC, and count points in 2D bins
-int ProcessChunkAnd2DBin(double* buffer, size_t buffer_size, double iMinValue, double iMaxValue,FILE *fp) {
-    struct tPosition pos;
+int ProcessChunkAnd2DBin(double* buffer, size_t buffer_size,FILE *fp) {
+    
 
+    struct tPosition pos;
     // Calculate DSC and normalize for all but the first 3 elements (which don't have full history)
     for (size_t a = 3; a < buffer_size; a++) {
+
         pos.x = buffer[a] - buffer[a - 1];
         pos.y = buffer[a - 1] - buffer[a - 2];
         pos.z = buffer[a - 2] - buffer[a - 3];
@@ -97,11 +103,34 @@ int ProcessChunkAnd2DBin(double* buffer, size_t buffer_size, double iMinValue, d
 
     return 0;
 }
+int FindGlobalMinMax(const char* filename)
+{
+    FILE* input_file = fopen(filename, "r");
+    if (!input_file) {
+        printf("Failed to open the file.\n");
+        return 1;
+    }
+
+    double number;
+    iMaxValue = -DBL_MAX;
+    iMinValue = DBL_MAX;
+
+    // First pass to find global min/max
+    while (fscanf(input_file, "%lf", &number) == 1) {
+        if (number < iMinValue) iMinValue = number;
+        if (number > iMaxValue) iMaxValue = number;
+    }
+
+    fclose(input_file);
+
+    printf("Global Min: %lf, Global Max: %lf\n", iMinValue, iMaxValue);
+    return 0;
+}
 
 // Function to load the data file in chunks, calculate DSC, and bin points in 2D
-int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* output_filename, size_t chunk_size) 
+// Preserving the Last 3 Elements: The buffer moves the last 3 elements to the front after each chunk is processed to ensure continuity for the DSC calculation.
+int LoadFileInChunksAnd2DBin(const char* arg, const char* filename, const char* output_filename, size_t chunk_size)
 {
- 
     FILE* input_file = fopen(filename, "r");
     if (!input_file) {
         printf("Failed to open the file.\n");
@@ -115,10 +144,6 @@ int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* o
         return 1;
     }
 
-    double number;
-    double iMaxValue = -DBL_MAX;
-    double iMinValue = DBL_MAX;
-
     size_t buffer_size = chunk_size + 3;  // 3 extra slots for DSC history
     double* buffer = (double*)malloc(buffer_size * sizeof(double));
     if (!buffer) {
@@ -130,19 +155,16 @@ int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* o
 
     size_t count = 0;
     size_t chunk_index = 0;
+    double number;
 
-    // Read data in chunks and process
+    // Read data in chunks and process with global min/max
     while (fscanf(input_file, "%lf", &number) == 1) {
-        if (number < iMinValue) iMinValue = number;
-        if (number > iMaxValue) iMaxValue = number;
-
         buffer[count++] = number;
 
         // When the buffer is full, process it
         if (count == buffer_size) {
             printf("Processing chunk %zu\n", chunk_index);
-
-            ProcessChunkAnd2DBin(buffer, buffer_size, iMinValue, iMaxValue,output_file);
+            ProcessChunkAnd2DBin(buffer, buffer_size, output_file);
             chunk_index++;
 
             // Move the last 3 elements to the front of the buffer for the next chunk
@@ -150,13 +172,13 @@ int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* o
             buffer[1] = buffer[buffer_size - 2];
             buffer[2] = buffer[buffer_size - 1];
 
-            count = 3;  // Reset count to continue filling the buffer
+            count = 3;  // Reset count to continue filling the buffer, preserving last 3 points
         }
     }
 
-    // Process the remaining data if the file didn't exactly fill the buffer
+    // Process any remaining data
     if (count > 3) {
-        ProcessChunkAnd2DBin(buffer, count, iMinValue, iMaxValue,output_file);
+        ProcessChunkAnd2DBin(buffer, count, output_file);
     }
 
     double entropy = 0.0;
@@ -175,9 +197,13 @@ int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* o
             }            
         }
     }
-    
-    fprintf(output_file, "# Entropy = %f\n",entropy);
+
+    fprintf(output_file, "# Entropy = %f\n", entropy);
     fprintf(output_file, "# Argument = %s\n", arg);
+    fprintf(output_file, "# Total = %i\n", iTotalPointsCount);
+    fprintf(output_file, "# Min = %lf\n", iMinValue);
+    fprintf(output_file, "# Max = %lf\n", iMaxValue);
+
 
     // Clean up
     free(buffer);
@@ -189,9 +215,12 @@ int LoadFileInChunksAnd2DBin(const char* arg,const char* filename, const char* o
 
 void local_main(const char* arg, size_t len) {
     printf("Starting task\n");
+    
+    // First pass to find the global min and max
+    FindGlobalMinMax("/spiffs/task_input");
 
     // Process 50 chunks of raw data at once (mem safe)
-    LoadFileInChunksAnd2DBin(arg,"/spiffs/task_input", "/spiffs/task_output", 100);  
+    LoadFileInChunksAnd2DBin(arg,"/spiffs/task_input", "/spiffs/task_output",100);
 
     printf("Job done\n");
 }
